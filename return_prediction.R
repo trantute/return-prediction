@@ -135,7 +135,7 @@ make_prediction <- function(data, price_id=NULL, shift=1, breaks=5, ignore=c()){
    # were levels for prediction used in fit?
    b <- rep(TRUE,3); for (i in 4:length(to_predict)){b <- c(b, to_predict[1,colnames(to_predict)[i]] %in% shifted_return[,colnames(to_predict)[i]])}
    if (sum(!b) > 0)
-      cat(paste("New levels: ", paste(colnames(to_predict)[!b], collapse=", "), sep=""));
+      cat(paste("New levels: ", paste(colnames(to_predict)[!b], collapse=", "), "\n", sep=""));
 
    # replace non-existing factors with last one in shifted_R
    # actually it should be better to use factor from fit, which is closest
