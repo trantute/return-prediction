@@ -245,7 +245,7 @@ doIt <- function(breaks=15,
   return(return_prediction);
 }
 
-doIt(old=c(0.06927308, -0.108199108918301));
+doIt(old=c(0.06927308, -0.108199108918301, 0.15401893716921));
 
 # debugging
 a <- doIt(back=1);
