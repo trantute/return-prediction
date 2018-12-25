@@ -219,6 +219,19 @@ make_prediction <- function(data, price_id=NULL, shift=1, breaks=5, ignore=c(), 
   return(ret);
 }
 
+# This function computes the effect sizes of each factor.
+make_effect_sizes <- function(shifted_fit, with_noise=FALSE){
+  effsizes <- anova(shifted_fit);
+  
+  if (!with_noise)
+    effsizes <- effsizes[rownames(effsizes)!="Residuals",];
+    
+  ret <- effsizes[["Sum Sq"]]/sum(effsizes[["Sum Sq"]]);
+  names(ret) <- rownames(effsizes);
+  
+  return(ret);
+}
+
 # This functions computes return prediction for the coming week and plots it. 
 doIt <- function(breaks=15,
                  dir="coinmetrics",
@@ -228,7 +241,8 @@ doIt <- function(breaks=15,
                  type=c("price", "value", ".txVolume.", "marketcap"),
                  old=c(),
                  back=0,
-                 simple=FALSE){
+                 simple=FALSE,
+                 effsizes=0){
   
   # read coinmetrics data from directory
   x <- read_dir(dir);
@@ -284,7 +298,13 @@ doIt <- function(breaks=15,
   
   #n <- 10^8; print(sum((ceiling(runif(n)*nrow(shifted_R)) <= sum(shifted_R[,price_id] < 0)) == (ceiling(runif(n)*nrow(shifted_R)) <= sum(shifted_R[,price_id] < 0)))/n);
   
-  dev.new(width=19, height=3.5);
+  if (effsizes == 0){
+    dev.new(width=19, height=3.5);
+  } else {
+    dev.new(width=19, height=7); 
+    par(mfrow=c(2,1));
+  }
+  
   matplot(breaked_return[,price_id], type="l", col=c("blue"), lty = c(1), xaxt="n");
   abline(h=0, col="black");
   lines((1:length(evaluation_historically))+1, evaluation_historically, col="violet");
@@ -314,10 +334,18 @@ doIt <- function(breaks=15,
   
   title(sub=s, adj=0, line=3, font=2, cex.sub=0.9);
   
+  if (effsizes == 1)
+    pie(make_effect_sizes(shifted_fit=shifted_fit, with_noise=TRUE), main="Effect sizes with noise");
+
+  if (effsizes == 2)
+    pie(make_effect_sizes(shifted_fit=shifted_fit, with_noise=FALSE), main="Effect sizes without noise");
+  
   return(return_prediction);
 }
 
-ret <- doIt(old=c(0.06927308, -0.108199108918301, 0.15401893716921), simple=TRUE);
+#ret <- doIt(old=c(0.06927308, -0.108199108918301, 0.15401893716921), simple=TRUE);
+#ret <- doIt(old=c(0.06927308, -0.108199108918301, 0.15401893716921), simple=TRUE, effsizes=1);
+ret <- doIt(old=c(0.06927308, -0.108199108918301, 0.15401893716921), simple=TRUE, effsizes=2);
 
 # debugging
 a <- doIt(back=1);
