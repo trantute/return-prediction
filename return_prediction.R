@@ -232,6 +232,50 @@ make_effect_sizes <- function(shifted_fit, with_noise=FALSE){
   return(ret);
 }
 
+get_google <- function(google_file="multiTimeline.csv"){
+  library(anytime);
+  
+  google <- as.matrix(read.table(file=google_file, sep=",", quote=""));
+  google <- cbind("DATE"=rownames(google), google);
+  google <- google[2:nrow(google),];
+  
+  colnames(google) <- c("DATE", "FREQUENCY");
+  rownames(google) <- NULL;
+  google <- as.data.frame(google);
+  
+  # firstly, fill in missing days
+  ret <- NULL;
+  for (i in 1:(nrow(google)-1)){
+    ret <- rbind(ret, google[i,]);
+    diff <- as.numeric(as.Date(google$DATE[i+1]) - as.Date(google$DATE[i]));
+    if (diff > 1){
+      add <- matrix(NA, diff-1, ncol(google));
+      add[,2] <- as.character(google$FREQUENCY[i]);
+      colnames(add) <- colnames(google);
+      for (j in 1:nrow(add)){
+        add[j,"DATE"] <- as.character(as.Date(google$DATE[i])+j);
+      }
+      ret <- rbind(ret, add);
+    }
+  }
+  ret <- rbind(ret, google[nrow(google),]);
+  
+  wdays <- weekdays(as.Date(ret$DATE, "%Y-%m-%d"));
+  ret <- cbind(ret, "WEEK_DAY"=wdays);
+  
+  # get saturdays and fridays
+  open <- head(ret[ret$WEEK_DAY=="Saturday",], -1);
+  close <- tail(ret[ret$WEEK_DAY=="Friday",], -1);
+  
+  g <- data.frame("OPEN_DATE"=open$DATE, "CLOSE_DATE"=close$DATE, "OPEN_PRICE"=open$FREQUENCY, "CLOSE_PRICE"=close$FREQUENCY);
+  g$OPEN_PRICE <- as.numeric(as.character(g$OPEN_PRICE));
+  g$CLOSE_PRICE <- as.numeric(as.character(g$CLOSE_PRICE));
+  
+  g <- cbind(g, "google_search"=make_return(g));
+  
+  return(g);
+}
+
 # This functions computes return prediction for the coming week and plots it. 
 doIt <- function(breaks=15,
                  dir="coinmetrics",
@@ -239,6 +283,7 @@ doIt <- function(breaks=15,
                  date="btc.csv.date",
                  assets=c("btc", "ltc", "eth", "xrp", "doge", "usdt", "gold", "sp500"),
                  type=c("price", "value", ".txVolume.", "marketcap"),
+                 google_file=NULL,
                  old=c(),
                  back=0,
                  simple=FALSE,
@@ -273,6 +318,12 @@ doIt <- function(breaks=15,
   for (i in 2:ncol(x))
     return <- cbind(return, make_return(make_open_close(x, price=colnames(x)[i])));
   colnames(return)[3:length(colnames(return))] <- colnames(x)[2:length(colnames(x))];
+
+  if (!is.null(google_file)){  
+    g <- get_google(google_file=google_file);
+    g <- g[,c("OPEN_DATE", "google_search")];
+    return <- merge(return, g, by="OPEN_DATE");
+  }
   
   # only use submatrix if old predictions are needed
   return <- return[1:(nrow(return)-back),];
@@ -334,62 +385,76 @@ doIt <- function(breaks=15,
   
   title(sub=s, adj=0, line=3, font=2, cex.sub=0.9);
   
-  if (effsizes == 1)
-    pie(make_effect_sizes(shifted_fit=shifted_fit, with_noise=TRUE), main="Effect sizes with noise");
-
-  if (effsizes == 2)
-    pie(make_effect_sizes(shifted_fit=shifted_fit, with_noise=FALSE), main="Effect sizes without noise");
+  es <- NULL;
+  if (effsizes == 1){
+    es <- make_effect_sizes(shifted_fit=shifted_fit, with_noise=TRUE);
+    pie(es, main="Effect sizes with noise");
+  }
   
+  if (effsizes == 2){
+    es <- make_effect_sizes(shifted_fit=shifted_fit, with_noise=FALSE);
+    pie(es, main="Effect sizes without noise");
+  }
+  
+  if (!is.null(es)){
+    return_prediction <- append(return_prediction, list(es));
+    names(return_prediction)[length(return_prediction)] <- "EFFECT_SIZES";
+  }
+    
   return(return_prediction);
 }
 
 #ret <- doIt(old=c(0.06927308, -0.108199108918301, 0.15401893716921), simple=TRUE);
 #ret <- doIt(old=c(0.06927308, -0.108199108918301, 0.15401893716921), simple=TRUE, effsizes=1);
-ret <- doIt(old=c(0.06927308, -0.108199108918301, 0.15401893716921), simple=TRUE, effsizes=2);
+#ret <- doIt(old=c(0.06927308, -0.108199108918301, 0.15401893716921), simple=TRUE, effsizes=2);
+ret <- doIt(google_file="multiTimeline.csv", old=c(0.06927308, -0.108199108918301, 0.15401893716921, 0.244917868419962), simple=TRUE, effsizes=1);
 
-# debugging
-a <- doIt(back=1);
-b <- doIt(back=0);
+es_table <- t(t(ret$EFFECT_SIZES));
+es_table[order(es_table[,1], decreasing=TRUE),,drop=FALSE];
 
-# are model matrices the same?
-aX <- model.matrix(a$SHIFTED_FIT);
-bX <- model.matrix(b$SHIFTED_FIT);
-sum(as.matrix(aX[1:nrow(aX),] != bX[1:nrow(aX),]));
-
-# change in coefficients from last week to current one
-sum((coefficients(a$SHIFTED_FIT) - coefficients(b$SHIFTED_FIT))^2, na.rm = TRUE);
-
-# some other test
-abeta <- coefficients(a$SHIFTED_FIT);
-aX_ <- aX[,!is.na(abeta)];
-abeta_ <- abeta[!is.na(abeta)];
-aret <- aX_%*%abeta_;
-
-bbeta <- coefficients(b$SHIFTED_FIT);
-bX_ <- bX[,!is.na(bbeta)];
-bbeta_ <- bbeta[!is.na(bbeta)];
-bret <- bX_%*%bbeta_;
-
-# some other test
-sum(a$TO_PREDICT != b$SHIFTED_RETURN[nrow(b$SHIFTED_RETURN),], na.rm = TRUE);
-
-# some other test
-solution_without_knowledge <- predict(a$SHIFTED_FIT, a$TO_PREDICT);
-X <- rbind(aX, bX[nrow(bX),]);
-X <- X[,!is.na(abeta)];
-beta <- abeta[!is.na(abeta)];
-solution_with_knowledge <- tail(X %*% beta, 1);
-# seems to work correctly
-
-# some other test
-last_row <- bX[nrow(bX),];
-last_row <- last_row[!is.na(abeta)];
-abeta_ <- abeta[!is.na(abeta)];
-abeta_ <- abeta_[last_row != 0];
-bbeta_ <- bbeta[!is.na(bbeta)];
-bbeta_ <- bbeta_[last_row != 0];
-last_row <- last_row[last_row != 0];
-last_row %*% abeta_; # same as sum(abeta_)
-last_row %*% bbeta_; # same as sum(bbeta_)
-# difference between prediction and current value is
-# caused by different beta values from different fits
+## debugging
+#a <- doIt(back=1);
+#b <- doIt(back=0);
+#
+## are model matrices the same?
+#aX <- model.matrix(a$SHIFTED_FIT);
+#bX <- model.matrix(b$SHIFTED_FIT);
+#sum(as.matrix(aX[1:nrow(aX),] != bX[1:nrow(aX),]));
+#
+## change in coefficients from last week to current one
+#sum((coefficients(a$SHIFTED_FIT) - coefficients(b$SHIFTED_FIT))^2, na.rm = TRUE);
+#
+## some other test
+#abeta <- coefficients(a$SHIFTED_FIT);
+#aX_ <- aX[,!is.na(abeta)];
+#abeta_ <- abeta[!is.na(abeta)];
+#aret <- aX_%*%abeta_;
+#
+#bbeta <- coefficients(b$SHIFTED_FIT);
+#bX_ <- bX[,!is.na(bbeta)];
+#bbeta_ <- bbeta[!is.na(bbeta)];
+#bret <- bX_%*%bbeta_;
+#
+## some other test
+#sum(a$TO_PREDICT != b$SHIFTED_RETURN[nrow(b$SHIFTED_RETURN),], na.rm = TRUE);
+#
+## some other test
+#solution_without_knowledge <- predict(a$SHIFTED_FIT, a$TO_PREDICT);
+#X <- rbind(aX, bX[nrow(bX),]);
+#X <- X[,!is.na(abeta)];
+#beta <- abeta[!is.na(abeta)];
+#solution_with_knowledge <- tail(X %*% beta, 1);
+## seems to work correctly
+#
+## some other test
+#last_row <- bX[nrow(bX),];
+#last_row <- last_row[!is.na(abeta)];
+#abeta_ <- abeta[!is.na(abeta)];
+#abeta_ <- abeta_[last_row != 0];
+#bbeta_ <- bbeta[!is.na(bbeta)];
+#bbeta_ <- bbeta_[last_row != 0];
+#last_row <- last_row[last_row != 0];
+#last_row %*% abeta_; # same as sum(abeta_)
+#last_row %*% bbeta_; # same as sum(bbeta_)
+## difference between prediction and current value is
+## caused by different beta values from different fits
